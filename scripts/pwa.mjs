@@ -51,9 +51,21 @@ const head = `
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="${NAME}" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-    <style>html,body{background:${BG};overscroll-behavior:none}</style>
-    <script>if('serviceWorker' in navigator){addEventListener('load',function(){navigator.serviceWorker.register('sw.js')})}</script>
+    <style>
+      html,body{background:${BG};overscroll-behavior:none;touch-action:pan-x pan-y;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+      body{position:fixed;inset:0;width:100%;height:100%;overflow:hidden;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+    </style>
+    <script>
+      if('serviceWorker' in navigator){addEventListener('load',function(){navigator.serviceWorker.register('sw.js')})}
+      // запрет зума щипком (двойной тап уже отключён через touch-action)
+      document.addEventListener('touchmove',function(e){if(e.touches.length>1)e.preventDefault()},{passive:false});
+      document.addEventListener('gesturestart',function(e){e.preventDefault()});
+    </script>
 `;
+html = html.replace(
+  /<meta name="viewport"[^>]*>/,
+  '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />'
+);
 html = html.replace('</head>', head + '</head>');
 writeFileSync(indexPath, html);
 
@@ -79,6 +91,20 @@ self.addEventListener('activate', (e) => {
 });
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  // Страница: сначала сеть (чтобы обновления приходили сразу), без сети — из кеша
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put('./', copy));
+          return res;
+        })
+        .catch(() => caches.match('./'))
+    );
+    return;
+  }
+  // Остальные файлы (JS, иконки) имеют хеш в имени — берём из кеша
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((hit) =>
       hit || fetch(e.request).catch(() => caches.match('./'))
